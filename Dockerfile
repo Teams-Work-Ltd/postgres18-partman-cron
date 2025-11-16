@@ -5,7 +5,7 @@ LABEL org.opencontainers.image.source="https://github.com/Teams-Work-Ltd/postgre
     org.opencontainers.image.description="Postgres 18 with pg_partman and pg_cron pre-installed."
 
 ARG PG_PARTMAN_VERSION=v4.7.1
-ARG PG_CRON_VERSION=v1.6.2
+ARG PG_CRON_VERSION=v1.6.7
 ARG BUILD_DEPS="build-essential ca-certificates curl libpq-dev postgresql-server-dev-18 pkg-config libssl-dev libkrb5-dev libicu-dev cmake"
 
 ENV PG_PARTMAN_VERSION=${PG_PARTMAN_VERSION} \

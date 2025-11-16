@@ -2,10 +2,15 @@
 set -euo pipefail
 
 PRIMARY_DB=${POSTGRES_DB:-${POSTGRES_USER:-postgres}}
+PRIMARY_USER=${POSTGRES_USER:-postgres}
 
-cat >>"${PGDATA}/postgresql.conf" <<EOF
+psql -v ON_ERROR_STOP=1 --username "$PRIMARY_USER" --dbname postgres <<SQL
+ALTER SYSTEM SET shared_preload_libraries = 'pg_cron';
+ALTER SYSTEM SET cron.database_name = '${PRIMARY_DB}';
+SQL
 
-# Auto-configured by docker-entrypoint-initdb.d/00_configure_pg_cron.sh
-shared_preload_libraries = 'pg_cron'
-cron.database_name = '${PRIMARY_DB}'
-EOF
+pg_ctl -D "$PGDATA" -m fast restart >/dev/null 2>&1
+
+until pg_isready -U "$PRIMARY_USER" -d "$PRIMARY_DB" >/dev/null 2>&1; do
+	sleep 1
+done
