@@ -1,0 +1,8 @@
+# Ignore unnecessary files for build context
+.git
+.github
+README.md
+LICENSE
+**/__pycache__/
+*.pyc
+.DS_Store
