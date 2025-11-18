@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-PRIMARY_DB=${POSTGRES_DB:-${POSTGRES_USER:-postgres}}
+PRIMARY_DB=postgres
 PRIMARY_USER=${POSTGRES_USER:-postgres}
 
 psql -v ON_ERROR_STOP=1 --username "$PRIMARY_USER" --dbname postgres <<SQL

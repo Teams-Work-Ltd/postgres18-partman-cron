@@ -8,7 +8,7 @@ Custom Postgres 18 image that pre-installs the [pg_partman](https://github.com/p
 - Build arguments to pin extension versions (`PG_PARTMAN_VERSION`, `PG_CRON_VERSION`)
 - Compiles both extensions from source for maximum compatibility across architectures
 - `docker-entrypoint-initdb.d` helpers that:
-  - Append `shared_preload_libraries = 'pg_cron'` and `cron.database_name = '<db>'`
+  - Append `shared_preload_libraries = 'pg_cron'` and set `cron.database_name = 'postgres'`
   - Create a `partman` schema and install `pg_partman` (in the target DB and `template1`)
   - Install `pg_cron` in the primary database so the background worker is available immediately
 
@@ -39,7 +39,7 @@ docker run --rm \
 The initialization scripts will:
 
 1. Set `shared_preload_libraries = 'pg_cron'` in the generated `postgresql.conf`
-2. Set `cron.database_name` to `${POSTGRES_DB:-$POSTGRES_USER:-postgres}`
+2. Set `cron.database_name` to `postgres`
 3. Create the `partman` schema and install the extensions
 
 ### Creating extensions in additional databases
@@ -69,3 +69,7 @@ Secrets required: none beyond the default `GITHUB_TOKEN` for pushing to GHCR.
 - The Docker host must support Buildx and multi-arch builds when reproducing the workflow locally.
 - Change the `pg_partman`/`pg_cron` versions via build args if newer releases are needed.
 - `pg_cron`’s background worker can target only one database. Update `cron.database_name` in `docker-entrypoint-initdb.d/00_configure_pg_cron.sh` (or replace the script) if you need a different default.
+
+## License
+
+Released under the [MIT License](./LICENSE).
