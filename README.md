@@ -78,8 +78,8 @@ docker stop partman-test
 ```
 
 4. Commit and push the changes to `main` (or open a PR). The GitHub Actions workflow will build and push the GHCR tags automatically when the branch merges.
-5. Create an annotated git tag that reflects the release (for example `git tag -a v5.2.4 -m "Release pg_partman 5.2.4" && git push origin v5.2.4`). The workflow now runs for tag pushes and publishes an image tag with the exact same name (`ghcr.io/teams-work-ltd/postgres18-partman-cron:v5.2.4`).
-6. Pull whichever tag you need locally (e.g., `docker pull ghcr.io/teams-work-ltd/postgres18-partman-cron:v5.2.4` or `:18`) before promoting it to other environments.
+5. Create an annotated git tag that reflects the release (for example `git tag -a v1.0.0 -m "Release 1.0.0" && git push origin v1.0.0`). The workflow now runs for tag pushes and publishes an image tag with the exact same name (`ghcr.io/teams-work-ltd/postgres18-partman-cron:v1.0.0`).
+6. Pull whichever tag you need locally (e.g., `docker pull ghcr.io/teams-work-ltd/postgres18-partman-cron:v1.0.0` or `:18`) before promoting it to other environments.
 
 ## Notes & assumptions
 
