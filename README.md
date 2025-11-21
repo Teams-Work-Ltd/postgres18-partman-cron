@@ -6,7 +6,7 @@ Custom Postgres 18 image that pre-installs the [pg_partman](https://github.com/p
 
 - Base image: `postgres:18`
 - Build arguments to pin extension versions (`PG_PARTMAN_VERSION`, `PG_CRON_VERSION`)
-- Compiles both extensions from source for maximum compatibility across architectures
+- Compiles both extensions from source for maximum compatibility across architectures (pg_partman v5.2.4 by default)
 - `docker-entrypoint-initdb.d` helpers that:
   - Append `shared_preload_libraries = 'pg_cron'` and set `cron.database_name = 'postgres'`
   - Create a `partman` schema and install `pg_partman` (in the target DB and `template1`)
@@ -18,7 +18,7 @@ Custom Postgres 18 image that pre-installs the [pg_partman](https://github.com/p
 
 ```bash
 # Optional: override extension versions
-export PG_PARTMAN_VERSION=v4.7.1
+export PG_PARTMAN_VERSION=v5.2.4
 export PG_CRON_VERSION=v1.6.2
 
 docker build \
@@ -63,6 +63,22 @@ The workflow in `.github/workflows/build-and-push.yml`:
 - Caches layers via the GitHub Actions cache backend for faster rebuilds
 
 Secrets required: none beyond the default `GITHUB_TOKEN` for pushing to GHCR.
+
+### Releasing a new image
+
+1. Update the relevant build args in the `Dockerfile` (for example `PG_PARTMAN_VERSION=v5.2.4`).
+2. Mirror the change in the `README.md` so the documented defaults stay in sync.
+3. Build and sanity-check the image locally:
+
+```bash
+docker build -t ghcr.io/teams-work-ltd/postgres18-partman-cron:test .
+docker run --rm --name partman-test -e POSTGRES_PASSWORD=postgres -d ghcr.io/teams-work-ltd/postgres18-partman-cron:test
+docker exec partman-test psql -U postgres -d postgres -c "\\dx"
+docker stop partman-test
+```
+
+4. Commit and push the changes to `main` (or open a PR). The GitHub Actions workflow will build and push the GHCR tags automatically when the branch merges.
+5. Pull the published tag locally (e.g., `docker pull ghcr.io/teams-work-ltd/postgres18-partman-cron:18`) and, if desired, create a release tag in Git to document the change.
 
 ## Notes & assumptions
 

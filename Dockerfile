@@ -4,7 +4,7 @@ FROM postgres:18
 LABEL org.opencontainers.image.source="https://github.com/Teams-Work-Ltd/postgres18-partman-cron" \
     org.opencontainers.image.description="Postgres 18 with pg_partman and pg_cron pre-installed."
 
-ARG PG_PARTMAN_VERSION=v4.7.1
+ARG PG_PARTMAN_VERSION=v5.2.4
 ARG PG_CRON_VERSION=v1.6.7
 ARG BUILD_DEPS="build-essential ca-certificates curl libpq-dev postgresql-server-dev-18 pkg-config libssl-dev libkrb5-dev libicu-dev cmake"
 
