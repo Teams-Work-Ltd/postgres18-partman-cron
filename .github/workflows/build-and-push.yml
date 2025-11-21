@@ -3,6 +3,7 @@ name: Build and Push Postgres Image
 on:
   push:
     branches: [main, master]
+    tags: ['*']
     paths:
       - "Dockerfile"
       - "docker-entrypoint-initdb.d/**"
@@ -43,6 +44,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=ref,event=pr
+            type=ref,event=tag
             type=raw,value=${{ steps.postgres-version.outputs.version }},enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
             type=sha,format=long
 

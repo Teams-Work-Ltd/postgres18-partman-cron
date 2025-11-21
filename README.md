@@ -56,7 +56,7 @@ Remember to update `cron.database_name` if you want the worker to target a diffe
 
 The workflow in `.github/workflows/build-and-push.yml`:
 
-- Triggers on pushes/PRs touching Docker-related files or workflows, plus manual dispatch
+- Triggers on pushes/PRs touching Docker-related files or workflows (including annotated git tags), plus manual dispatch
 - Detects the Postgres base image version from the `Dockerfile`
 - Builds multi-arch images (`linux/amd64`, `linux/arm64`) using Buildx + QEMU
 - Publishes tags to GitHub Container Registry (GHCR) with ref, PR, SHA, and Postgres version tags
@@ -78,7 +78,8 @@ docker stop partman-test
 ```
 
 4. Commit and push the changes to `main` (or open a PR). The GitHub Actions workflow will build and push the GHCR tags automatically when the branch merges.
-5. Pull the published tag locally (e.g., `docker pull ghcr.io/teams-work-ltd/postgres18-partman-cron:18`) and, if desired, create a release tag in Git to document the change.
+5. Create an annotated git tag that reflects the release (for example `git tag -a v5.2.4 -m "Release pg_partman 5.2.4" && git push origin v5.2.4`). The workflow now runs for tag pushes and publishes an image tag with the exact same name (`ghcr.io/teams-work-ltd/postgres18-partman-cron:v5.2.4`).
+6. Pull whichever tag you need locally (e.g., `docker pull ghcr.io/teams-work-ltd/postgres18-partman-cron:v5.2.4` or `:18`) before promoting it to other environments.
 
 ## Notes & assumptions
 
