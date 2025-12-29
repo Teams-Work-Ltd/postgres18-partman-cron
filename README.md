@@ -1,15 +1,16 @@
-# Postgres 18 + pg_partman + pg_cron
+# Postgres 18 + pg_partman + pg_cron + pgvector
 
-Custom Postgres 18 image that pre-installs the [pg_partman](https://github.com/pgpartman/pg_partman) partition management extension and the [pg_cron](https://github.com/citusdata/pg_cron) job scheduler. The image automatically configures `shared_preload_libraries`, enables a default `cron.database_name`, and creates the extensions during cluster initialization so they are ready immediately.
+Custom Postgres 18 image that pre-installs the [pg_partman](https://github.com/pgpartman/pg_partman) partition management extension, the [pg_cron](https://github.com/citusdata/pg_cron) job scheduler, and the [pgvector](https://github.com/pgvector/pgvector) vector similarity extension. The image automatically configures `shared_preload_libraries`, enables a default `cron.database_name`, and creates the extensions during cluster initialization so they are ready immediately.
 
 ## What's inside
 
-- Base image: `postgres:18`
+- Base image: `pgvector/pgvector:pg18-trixie`
 - Build arguments to pin extension versions (`PG_PARTMAN_VERSION`, `PG_CRON_VERSION`)
-- Compiles both extensions from source for maximum compatibility across architectures (pg_partman v5.2.4 by default)
+- Compiles extensions from source for maximum compatibility across architectures (pg_partman v5.2.4 by default)
 - `docker-entrypoint-initdb.d` helpers that:
   - Append `shared_preload_libraries = 'pg_cron'` and set `cron.database_name = 'postgres'`
   - Create a `partman` schema and install `pg_partman` (in the target DB and `template1`)
+  - Install `pgvector` (extension name: `vector`) in the target DB and `template1`
   - Install `pg_cron` in the primary database so the background worker is available immediately
 
 ## Usage
@@ -19,7 +20,7 @@ Custom Postgres 18 image that pre-installs the [pg_partman](https://github.com/p
 ```bash
 # Optional: override extension versions
 export PG_PARTMAN_VERSION=v5.2.4
-export PG_CRON_VERSION=v1.6.2
+export PG_CRON_VERSION=v1.6.7
 
 docker build \
   --build-arg PG_PARTMAN_VERSION \
@@ -44,10 +45,18 @@ The initialization scripts will:
 
 ### Creating extensions in additional databases
 
-Because `pg_partman` is installed in `template1`, any database created after the initial cluster will inherit it. To add `pg_cron` to another database, run:
+Because `pg_partman` and `pgvector` are installed in `template1`, any database created after the initial cluster will inherit them.
+
+To add `pg_cron` to another database, run:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS pg_cron;
+```
+
+To add `pgvector` to an existing database (if needed), run:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
 ```
 
 Remember to update `cron.database_name` if you want the worker to target a different database.
@@ -66,7 +75,7 @@ Secrets required: none beyond the default `GITHUB_TOKEN` for pushing to GHCR.
 
 ### Releasing a new image
 
-1. Update the relevant build args in the `Dockerfile` (for example `PG_PARTMAN_VERSION=v5.2.4`).
+1. Update the relevant build args in the `Dockerfile` (for example `PGVECTOR_VERSION=v0.8.0`).
 2. Mirror the change in the `README.md` so the documented defaults stay in sync.
 3. Build and sanity-check the image locally:
 
