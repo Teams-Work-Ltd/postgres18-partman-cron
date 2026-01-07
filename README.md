@@ -100,7 +100,7 @@ docker stop partman-test
 
 - The Docker host must support Buildx and multi-arch builds when reproducing the workflow locally.
 - Change the `pg_partman`/`pg_cron` versions via build args if newer releases are needed.
-- `pg_cron`’s background worker can target only one database. Update `cron.database_name` in `docker-entrypoint-initdb.d/00_configure_pg_cron.sh` (or replace the script) if you need a different default.
+- `pg_cron`’s background worker can target only one database. Update `cron.database_name` in `docker-entrypoint-initdb.d/00_configure_extensions.sh` (or replace the script) if you need a different default.
 
 ## License
 
