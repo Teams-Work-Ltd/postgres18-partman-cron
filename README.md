@@ -8,7 +8,7 @@ Custom Postgres 18 image that pre-installs the [pg_partman](https://github.com/p
 - Build arguments to pin extension versions (`PG_PARTMAN_VERSION`, `PG_CRON_VERSION`)
 - Compiles extensions from source for maximum compatibility across architectures (pg_partman v5.2.4 by default)
 - `docker-entrypoint-initdb.d` helpers that:
-  - Append `shared_preload_libraries = 'pg_cron'` and set `cron.database_name = 'postgres'`
+  - Append `shared_preload_libraries = 'pg_cron,pg_stat_statements'` and set `cron.database_name = 'postgres'`
   - Create a `partman` schema and install `pg_partman` (in the target DB and `template1`)
   - Install `pgvector` (extension name: `vector`) in the target DB and `template1`
   - Install `pg_cron` in the primary database so the background worker is available immediately
@@ -39,7 +39,7 @@ docker run --rm \
 
 The initialization scripts will:
 
-1. Set `shared_preload_libraries = 'pg_cron'` in the generated `postgresql.conf`
+1. Set `shared_preload_libraries = 'pg_cron,pg_stat_statements'` in the generated `postgresql.conf`
 2. Set `cron.database_name` to `postgres`
 3. Create the `partman` schema and install the extensions
 
