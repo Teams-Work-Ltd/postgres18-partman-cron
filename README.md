@@ -8,7 +8,7 @@ Custom Postgres 18 image that pre-installs the [pg_partman](https://github.com/p
 - Build arguments to pin extension versions (`PG_PARTMAN_VERSION`, `PG_CRON_VERSION`)
 - Compiles extensions from source for maximum compatibility across architectures (pg_partman v5.2.4 by default)
 - `docker-entrypoint-initdb.d` helpers that:
-  - Append `shared_preload_libraries = 'pg_cron'` and set `cron.database_name = 'postgres'`
+  - Append `shared_preload_libraries = 'pg_cron,pg_stat_statements'` and set `cron.database_name = 'postgres'`
   - Create a `partman` schema and install `pg_partman` (in the target DB and `template1`)
   - Install `pgvector` (extension name: `vector`) in the target DB and `template1`
   - Install `pg_cron` in the primary database so the background worker is available immediately
@@ -39,7 +39,7 @@ docker run --rm \
 
 The initialization scripts will:
 
-1. Set `shared_preload_libraries = 'pg_cron'` in the generated `postgresql.conf`
+1. Set `shared_preload_libraries = 'pg_cron,pg_stat_statements'` in the generated `postgresql.conf`
 2. Set `cron.database_name` to `postgres`
 3. Create the `partman` schema and install the extensions
 
@@ -57,6 +57,12 @@ To add `pgvector` to an existing database (if needed), run:
 
 ```sql
 CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+To enable `pg_stat_statements` for query performance monitoring, run:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 ```
 
 Remember to update `cron.database_name` if you want the worker to target a different database.
@@ -94,7 +100,7 @@ docker stop partman-test
 
 - The Docker host must support Buildx and multi-arch builds when reproducing the workflow locally.
 - Change the `pg_partman`/`pg_cron` versions via build args if newer releases are needed.
-- `pg_cron`’s background worker can target only one database. Update `cron.database_name` in `docker-entrypoint-initdb.d/00_configure_pg_cron.sh` (or replace the script) if you need a different default.
+- `pg_cron`’s background worker can target only one database. Update `cron.database_name` in `docker-entrypoint-initdb.d/00_configure_extensions.sh` (or replace the script) if you need a different default.
 
 ## License
 
