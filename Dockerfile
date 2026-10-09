@@ -1,11 +1,11 @@
 # syntax=docker/dockerfile:1.9
-FROM pgvector/pgvector:pg18-trixie
+FROM pgvector/pgvector:0.8.7-pg18-trixie
 
 LABEL org.opencontainers.image.source="https://github.com/Teams-Work-Ltd/postgres18-partman-cron" \
     org.opencontainers.image.description="Postgres 18 with pg_partman, pg_cron, and pgvector pre-installed."
 
-ARG PG_PARTMAN_VERSION=v5.2.4
-ARG PG_CRON_VERSION=v1.6.7
+ARG PG_PARTMAN_VERSION=v5.5.0
+ARG PG_CRON_VERSION=v1.6.8
 ARG BUILD_DEPS="build-essential ca-certificates curl libpq-dev postgresql-server-dev-18 pkg-config libssl-dev libkrb5-dev libicu-dev cmake"
 
 ENV PG_PARTMAN_VERSION=${PG_PARTMAN_VERSION} \
@@ -13,6 +13,7 @@ ENV PG_PARTMAN_VERSION=${PG_PARTMAN_VERSION} \
 
 RUN set -eux; \
     apt-get update; \
+    apt-get upgrade -y; \
     apt-get install -y --no-install-recommends $BUILD_DEPS; \
     update-ca-certificates
 

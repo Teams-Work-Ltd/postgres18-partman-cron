@@ -30,11 +30,12 @@ jobs:
         run: |
           # Supports:
           # - FROM postgres:18
+          # - FROM pgvector/pgvector:0.8.7-pg18-trixie
           # - FROM pgvector/pgvector:pg18-trixie
           FROM_LINE=$(grep '^FROM ' Dockerfile | head -n 1)
           VERSION=$(echo "$FROM_LINE" | sed -nE 's/^FROM postgres:([0-9]+).*$/\1/p')
           if [ -z "$VERSION" ]; then
-            VERSION=$(echo "$FROM_LINE" | sed -nE 's/^FROM pgvector\/pgvector:pg([0-9]+).*$/\1/p')
+            VERSION=$(echo "$FROM_LINE" | sed -nE 's/^FROM pgvector\/pgvector:(.*-)?pg([0-9]+).*$/\2/p')
           fi
           if [ -z "$VERSION" ]; then
             echo "Unable to determine Postgres version" >&2
