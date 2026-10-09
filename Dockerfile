@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.9
-FROM pgvector/pgvector:0.8.7-pg18-trixie
+FROM pgvector/pgvector:pg18-trixie
 
 LABEL org.opencontainers.image.source="https://github.com/Teams-Work-Ltd/postgres18-partman-cron" \
     org.opencontainers.image.description="Postgres 18 with pg_partman, pg_cron, and pgvector pre-installed."

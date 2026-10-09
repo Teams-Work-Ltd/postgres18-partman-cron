@@ -4,7 +4,7 @@ Custom Postgres 18 image that pre-installs the [pg_partman](https://github.com/p
 
 ## What's inside
 
-- Base image: `pgvector/pgvector:0.8.7-pg18-trixie`
+- Base image: `pgvector/pgvector:pg18-trixie`
 - Build arguments to pin extension versions (`PG_PARTMAN_VERSION`, `PG_CRON_VERSION`)
 - Compiles extensions from source for maximum compatibility across architectures (pg_partman v5.5.0 by default)
 - `docker-entrypoint-initdb.d` helpers that:
