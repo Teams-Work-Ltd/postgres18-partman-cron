@@ -1,17 +1,18 @@
 # Postgres 18 + pg_partman + pg_cron + pgvector
 
-Custom Postgres 18 image that pre-installs the [pg_partman](https://github.com/pgpartman/pg_partman) partition management extension, the [pg_cron](https://github.com/citusdata/pg_cron) job scheduler, and the [pgvector](https://github.com/pgvector/pgvector) vector similarity extension. The image automatically configures `shared_preload_libraries`, enables a default `cron.database_name`, and creates the extensions during cluster initialization so they are ready immediately.
+Postgres 18 image with the [pg_partman](https://github.com/pgpartman/pg_partman) partition management extension, the [pg_cron](https://github.com/citusdata/pg_cron) job scheduler, and the [pgvector](https://github.com/pgvector/pgvector) vector similarity extension pre-installed. The image configures `shared_preload_libraries`, sets a default `cron.database_name`, and creates the extensions during cluster initialization so they are ready immediately.
 
 ## What's inside
 
-- Base image: `pgvector/pgvector:pg18-trixie`
-- Build arguments to pin extension versions (`PG_PARTMAN_VERSION`, `PG_CRON_VERSION`)
-- Compiles extensions from source for maximum compatibility across architectures (pg_partman v5.5.0 by default)
+- Base image: [Wolfi](https://github.com/wolfi-dev) (`cgr.dev/chainguard/wolfi-base`), with Postgres and the extensions installed from Wolfi packages
+- Build arguments to pin extension versions (`PG_PARTMAN_VERSION`, `PG_CRON_VERSION`, `PGVECTOR_VERSION`); each pins the upstream version and still picks up Wolfi security rebuilds
+- The docker-library `docker-entrypoint.sh`, so the usual `POSTGRES_*` environment variables and `/docker-entrypoint-initdb.d` work as they do with the official image
+- Same postgres uid/gid (999), `PGDATA` (`/var/lib/postgresql/18/docker`) and volume path (`/var/lib/postgresql`) as the official Debian image
 - `docker-entrypoint-initdb.d` helpers that:
-  - Append `shared_preload_libraries = 'pg_cron,pg_stat_statements'` and set `cron.database_name = 'postgres'`
+  - Set `shared_preload_libraries = 'pg_cron,pg_stat_statements'` and `cron.database_name = 'postgres'`
   - Create a `partman` schema and install `pg_partman` (in the target DB and `template1`)
-  - Install `pgvector` (extension name: `vector`) in the target DB and `template1`
-  - Install `pg_cron` in the primary database so the background worker is available immediately
+  - Install `pgvector` (extension name: `vector`) and `pg_stat_statements` in the target DB, and `pgvector` in `template1`
+  - Install `pg_cron` in the `postgres` database so the background worker is available immediately
 
 ## Usage
 
@@ -19,12 +20,14 @@ Custom Postgres 18 image that pre-installs the [pg_partman](https://github.com/p
 
 ```bash
 # Optional: override extension versions
-export PG_PARTMAN_VERSION=v5.5.0
-export PG_CRON_VERSION=v1.6.8
+export PG_PARTMAN_VERSION=5.5.0
+export PG_CRON_VERSION=1.6.8
+export PGVECTOR_VERSION=0.8.7
 
 docker build \
   --build-arg PG_PARTMAN_VERSION \
   --build-arg PG_CRON_VERSION \
+  --build-arg PGVECTOR_VERSION \
   -t ghcr.io/<owner>/<repo>:local .
 ```
 
@@ -34,12 +37,13 @@ docker build \
 docker run --rm \
   -e POSTGRES_PASSWORD=postgres \
   -p 5432:5432 \
+  -v pgdata:/var/lib/postgresql \
   ghcr.io/<owner>/<repo>:local
 ```
 
 The initialization scripts will:
 
-1. Set `shared_preload_libraries = 'pg_cron,pg_stat_statements'` in the generated `postgresql.conf`
+1. Set `shared_preload_libraries = 'pg_cron,pg_stat_statements'`
 2. Set `cron.database_name` to `postgres`
 3. Create the `partman` schema and install the extensions
 
@@ -47,10 +51,10 @@ The initialization scripts will:
 
 Because `pg_partman` and `pgvector` are installed in `template1`, any database created after the initial cluster will inherit them.
 
-To add `pg_cron` to another database, run:
+`pg_cron` lives in the `postgres` database. To schedule a job that runs in another database, use `cron.schedule_in_database`:
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS pg_cron;
+SELECT cron.schedule_in_database('partman-maintenance', '*/15 * * * *', 'CALL partman.run_maintenance_proc()', 'appdb');
 ```
 
 To add `pgvector` to an existing database (if needed), run:
@@ -65,42 +69,54 @@ To enable `pg_stat_statements` for query performance monitoring, run:
 CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 ```
 
-Remember to update `cron.database_name` if you want the worker to target a different database.
+## Upgrading existing volumes
+
+Swap the image tag and start the container. No manual steps are needed, including when moving from the Debian-based `v1.0.x` releases.
+
+On start, `docker-upgrade-entrypoint.sh` compares a stamp in `PGDATA` against the image's libc, Postgres and extension versions. When they differ, it starts a socket-only temporary server and, in every database:
+
+1. If the libc collation version changed, checks every btree index that uses a libc collation with `amcheck`, reindexes any that fail, then refreshes the recorded collation versions (this clears the `collation version mismatch` warning)
+2. Runs `ALTER EXTENSION ... UPDATE` for any extension older than the version in the image
+
+It then writes the stamp and starts Postgres normally, so later starts skip the check. If any step fails, it logs a warning, starts Postgres anyway and retries on the next start. Set `PG_AUTO_UPGRADE=false` to turn it off.
+
+Rolling back to an older tag works, but the older image logs warnings, because the recorded collation and extension versions are now newer than the ones it ships.
 
 ## GitHub Actions workflow
 
 The workflow in `.github/workflows/build-and-push.yml`:
 
-- Triggers on pushes/PRs touching Docker-related files or workflows (including annotated git tags), plus manual dispatch
-- Detects the Postgres base image version from the `Dockerfile`
+- Triggers on pushes/PRs touching Docker-related files, tests or workflows (including git tags), weekly on Monday, plus manual dispatch
+- Runs `tests/fresh.sh` (empty volumes under several `POSTGRES_USER`/`POSTGRES_DB` combinations) and `tests/upgrade.sh` (a `v1.0.2` volume swapped to the new image, restart, rollback); publishing only runs if both pass
+- Reads the Postgres major version from `ARG PG_MAJOR` in the `Dockerfile`
 - Builds multi-arch images (`linux/amd64`, `linux/arm64`) using Buildx + QEMU
 - Publishes tags to GitHub Container Registry (GHCR) with ref, PR, SHA, and Postgres version tags
-- Caches layers via the GitHub Actions cache backend for faster rebuilds
+
+The weekly run refreshes `main`, `18` and the SHA tags with the latest Wolfi packages. Release tags such as `v1.1.0` are only built when the git tag is pushed, so cut a new release to ship security fixes to consumers that pin a version.
 
 Secrets required: none beyond the default `GITHUB_TOKEN` for pushing to GHCR.
 
 ### Releasing a new image
 
-1. Update the relevant build args in the `Dockerfile` (for example `PGVECTOR_VERSION=v0.8.0`).
+1. Update the relevant build args in the `Dockerfile` (for example `PG_PARTMAN_VERSION=5.5.0`).
 2. Mirror the change in the `README.md` so the documented defaults stay in sync.
-3. Build and sanity-check the image locally:
+3. Build and test the image locally:
 
 ```bash
-docker build -t ghcr.io/teams-work-ltd/postgres18-partman-cron:test .
-docker run --rm --name partman-test -e POSTGRES_PASSWORD=postgres -d ghcr.io/teams-work-ltd/postgres18-partman-cron:test
-docker exec partman-test psql -U postgres -d postgres -c "\\dx"
-docker stop partman-test
+docker build -t postgres18-partman-cron:test .
+tests/fresh.sh postgres18-partman-cron:test
+tests/upgrade.sh postgres18-partman-cron:test
 ```
 
 4. Commit and push the changes to `main` (or open a PR). The GitHub Actions workflow will build and push the GHCR tags automatically when the branch merges.
-5. Create an annotated git tag that reflects the release (for example `git tag -a v1.0.0 -m "Release 1.0.0" && git push origin v1.0.0`). The workflow now runs for tag pushes and publishes an image tag with the exact same name (`ghcr.io/teams-work-ltd/postgres18-partman-cron:v1.0.0`).
-6. Pull whichever tag you need locally (e.g., `docker pull ghcr.io/teams-work-ltd/postgres18-partman-cron:v1.0.0` or `:18`) before promoting it to other environments.
+5. Create an annotated git tag that reflects the release (for example `git tag -a v1.1.0 -m "Release 1.1.0" && git push origin v1.1.0`). The workflow runs for tag pushes and publishes an image tag with the exact same name (`ghcr.io/teams-work-ltd/postgres18-partman-cron:v1.1.0`).
+6. Pull whichever tag you need locally (e.g., `docker pull ghcr.io/teams-work-ltd/postgres18-partman-cron:v1.1.0` or `:18`) before promoting it to other environments.
 
 ## Notes & assumptions
 
 - The Docker host must support Buildx and multi-arch builds when reproducing the workflow locally.
-- Change the `pg_partman`/`pg_cron` versions via build args if newer releases are needed.
-- `pg_cron`’s background worker can target only one database. Update `cron.database_name` in `docker-entrypoint-initdb.d/00_configure_extensions.sh` (or replace the script) if you need a different default.
+- The unix socket is in `/tmp` (the Wolfi Postgres default) instead of `/var/run/postgresql`. `psql` and `pg_isready` inside the container use it automatically; only clients that mount the socket from outside the container need the new path.
+- `pg_cron`'s background worker can target only one database. Update `cron.database_name` in `docker-entrypoint-initdb.d/00_configure_extensions.sh` (or replace the script) if you need a different default.
 
 ## License
 

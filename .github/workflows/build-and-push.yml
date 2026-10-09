@@ -7,10 +7,15 @@ on:
     paths:
       - "Dockerfile"
       - "docker-entrypoint-initdb.d/**"
+      - "docker-upgrade-entrypoint.sh"
+      - "tests/**"
       - ".github/workflows/**"
       - ".dockerignore"
   pull_request:
     branches: [main, master]
+  schedule:
+    # weekly rebuild to pick up Wolfi package security fixes
+    - cron: "0 5 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -18,7 +23,24 @@ permissions:
   packages: write
 
 jobs:
+  test:
+    runs-on: blacksmith-4vcpu-ubuntu-2404
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t postgres18-partman-cron:test .
+
+      - name: Fresh install tests
+        run: tests/fresh.sh postgres18-partman-cron:test
+
+      - name: Upgrade from previous release
+        run: tests/upgrade.sh postgres18-partman-cron:test
+
   build-and-push:
+    needs: test
     runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
@@ -28,15 +50,7 @@ jobs:
       - name: Extract Postgres version from Dockerfile
         id: postgres-version
         run: |
-          # Supports:
-          # - FROM postgres:18
-          # - FROM pgvector/pgvector:0.8.7-pg18-trixie
-          # - FROM pgvector/pgvector:pg18-trixie
-          FROM_LINE=$(grep '^FROM ' Dockerfile | head -n 1)
-          VERSION=$(echo "$FROM_LINE" | sed -nE 's/^FROM postgres:([0-9]+).*$/\1/p')
-          if [ -z "$VERSION" ]; then
-            VERSION=$(echo "$FROM_LINE" | sed -nE 's/^FROM pgvector\/pgvector:(.*-)?pg([0-9]+).*$/\2/p')
-          fi
+          VERSION=$(sed -nE 's/^ARG PG_MAJOR=([0-9]+)$/\1/p' Dockerfile)
           if [ -z "$VERSION" ]; then
             echo "Unable to determine Postgres version" >&2
             exit 1
