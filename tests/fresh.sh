@@ -3,6 +3,7 @@
 # usage: tests/fresh.sh <image>
 set -uo pipefail
 IMG=$1
+TEST_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 C=pgpc-test-fresh
 fail=0
 
@@ -41,7 +42,11 @@ for cfg in "${configs[@]}"; do
 		continue
 	fi
 	chk "init log has no errors" '! docker logs $C 2>&1 | grep -E "ERROR|FATAL" | grep -v "pg_cron launcher\" due to administrator command"'
-	chk "shared_preload_libraries" '[ "$(q $user postgres -c "SHOW shared_preload_libraries")" = "pg_cron, pg_stat_statements" ]'
+	chk "shared_preload_libraries" '[ "$(q $user postgres -c "SHOW shared_preload_libraries")" = "pg_cron, pg_stat_statements, pg_hint_plan" ]'
+	chk "pg_hint_plan 1.8.1 available" '[ "$(q $user $db -c "SELECT default_version FROM pg_available_extensions WHERE name = '"'"'pg_hint_plan'"'"'")" = 1.8.1 ]'
+	chk "comment hints work in $db" 'q $user $db < "$TEST_DIR/hints.sql" >/dev/null'
+	chk "comment hints work in template1" 'q $user template1 < "$TEST_DIR/hints.sql" >/dev/null'
+	chk "hint table is optional" '[ "$(q $user $db -c "SELECT count(*) FROM pg_extension WHERE extname = '"'"'pg_hint_plan'"'"'")" = 0 ]'
 	chk "listens on all interfaces" '[ "$(q $user postgres -c "SHOW listen_addresses")" = "*" ]'
 	chk "vector, pg_partman, pg_stat_statements in $db" '[ "$(q $user $db -c "SELECT count(*) FROM pg_extension WHERE extname IN ('"'"'vector'"'"', '"'"'pg_partman'"'"', '"'"'pg_stat_statements'"'"')")" = 3 ]'
 	chk "vector, pg_partman in template1" '[ "$(q $user template1 -c "SELECT count(*) FROM pg_extension WHERE extname IN ('"'"'vector'"'"', '"'"'pg_partman'"'"')")" = 2 ]'

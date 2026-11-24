@@ -1,15 +1,16 @@
-# Postgres 18 + pg_partman + pg_cron + pgvector
+# Postgres 18 + pg_partman + pg_cron + pgvector + pg_hint_plan
 
-Postgres 18 image with the [pg_partman](https://github.com/pgpartman/pg_partman) partition management extension, the [pg_cron](https://github.com/citusdata/pg_cron) job scheduler, and the [pgvector](https://github.com/pgvector/pgvector) vector similarity extension pre-installed. The image configures `shared_preload_libraries`, sets a default `cron.database_name`, and creates the extensions during cluster initialization so they are ready immediately.
+Postgres 18 image with the [pg_partman](https://github.com/pgpartman/pg_partman) partition management extension, the [pg_cron](https://github.com/citusdata/pg_cron) job scheduler, and the [pgvector](https://github.com/pgvector/pgvector) vector similarity extension pre-installed, plus [pg_hint_plan](https://github.com/ossc-db/pg_hint_plan) for SQL comment hints. The image configures `shared_preload_libraries`, sets a default `cron.database_name`, and creates the extensions during cluster initialization so they are ready immediately.
 
 ## What's inside
 
-- Base image: [Wolfi](https://github.com/wolfi-dev) (`cgr.dev/chainguard/wolfi-base`), with Postgres and the extensions installed from Wolfi packages
-- Build arguments to pin extension versions (`PG_PARTMAN_VERSION`, `PG_CRON_VERSION`, `PGVECTOR_VERSION`); each pins the upstream version and still picks up Wolfi security rebuilds
+- Base image: [Wolfi](https://github.com/wolfi-dev) (`cgr.dev/chainguard/wolfi-base`), with Postgres, pg_partman, pg_cron and pgvector installed from Wolfi packages
+- Build arguments select extension versions (`PG_PARTMAN_VERSION=5.5.1`, `PG_CRON_VERSION=1.6.8`, `PGVECTOR_VERSION=0.8.7`) while allowing Wolfi package rebuilds
+- `pg_hint_plan` 1.8.1, compiled against PostgreSQL 18 in a separate build stage from the upstream `REL18_1_8_1` archive, checked against `PG_HINT_PLAN_SHA256`; the runtime image contains no build tools
 - The docker-library `docker-entrypoint.sh`, so the usual `POSTGRES_*` environment variables and `/docker-entrypoint-initdb.d` work as they do with the official image
 - Same postgres uid/gid (999), `PGDATA` (`/var/lib/postgresql/18/docker`) and volume path (`/var/lib/postgresql`) as the official Debian image
 - `docker-entrypoint-initdb.d` helpers that:
-  - Set `shared_preload_libraries = 'pg_cron,pg_stat_statements'` and `cron.database_name = 'postgres'`
+  - Set `shared_preload_libraries = 'pg_cron,pg_stat_statements,pg_hint_plan'` and `cron.database_name = 'postgres'`
   - Create a `partman` schema and install `pg_partman` (in the target DB and `template1`)
   - Install `pgvector` (extension name: `vector`) and `pg_stat_statements` in the target DB, and `pgvector` in `template1`
   - Install `pg_cron` in the `postgres` database so the background worker is available immediately
@@ -20,7 +21,7 @@ Postgres 18 image with the [pg_partman](https://github.com/pgpartman/pg_partman)
 
 ```bash
 # Optional: override extension versions
-export PG_PARTMAN_VERSION=5.5.0
+export PG_PARTMAN_VERSION=5.5.1
 export PG_CRON_VERSION=1.6.8
 export PGVECTOR_VERSION=0.8.7
 
@@ -30,6 +31,8 @@ docker build \
   --build-arg PGVECTOR_VERSION \
   -t ghcr.io/<owner>/<repo>:local .
 ```
+
+To change pg_hint_plan, supply both `--build-arg PG_HINT_PLAN_VERSION=<version>` and `--build-arg PG_HINT_PLAN_SHA256=<archive-sha256>`. Use a release for PostgreSQL 18.
 
 ### Run
 
@@ -43,9 +46,25 @@ docker run --rm \
 
 The initialization scripts will:
 
-1. Set `shared_preload_libraries = 'pg_cron,pg_stat_statements'`
+1. Set `shared_preload_libraries = 'pg_cron,pg_stat_statements,pg_hint_plan'`
 2. Set `cron.database_name` to `postgres`
 3. Create the `partman` schema and install the extensions
+
+### SQL comment hints
+
+Comment hints work in every database without `CREATE EXTENSION pg_hint_plan`:
+
+```sql
+EXPLAIN SELECT /*+ SeqScan(e) */ * FROM events e WHERE id = 42;
+```
+
+The hint uses the table alias from the query. The optional hint table requires `CREATE EXTENSION pg_hint_plan` in each database where it is needed, and `pg_hint_plan.enable_hint_table=on`. The image leaves the hint table disabled.
+
+An explicit command-line `shared_preload_libraries` setting replaces the image default. Include `pg_hint_plan` in that list to keep hints enabled. For example, append these arguments after the image name:
+
+```bash
+postgres -c shared_preload_libraries=pg_cron,pg_stat_statements,pg_hint_plan,auto_explain
+```
 
 ### Creating extensions in additional databases
 
@@ -71,7 +90,11 @@ CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 
 ## Upgrading existing volumes
 
-Swap the image tag and start the container. No manual steps are needed, including when moving from the Debian-based `v1.0.x` releases.
+Existing PostgreSQL 18 volumes can be reused, including volumes from v1.1.0 and Debian-based v1.0.x releases. This does not perform a PostgreSQL major-version upgrade.
+
+On existing volumes, startup reads the effective preload configuration and adds `pg_hint_plan` to the server arguments, preserving other libraries. It does not write that addition to the volume. This also works with `PG_AUTO_UPGRADE=false`. Explicit command-line preload settings take precedence and must include `pg_hint_plan` to enable hints.
+
+A fresh build currently installs PostgreSQL 18.7. Review its [migration notes](https://www.postgresql.org/docs/release/18.7/) before deploying: some affected indexes require rebuilding, existing incremental backups need a new full backup, and C extensions need rebuilding. The automatic checks below only repair libc collation issues; they do not cover every migration action in the release notes.
 
 On start, `docker-upgrade-entrypoint.sh` compares a stamp in `PGDATA` against the image's libc, Postgres and extension versions. When they differ, it starts a socket-only temporary server and, in every database:
 
@@ -80,14 +103,16 @@ On start, `docker-upgrade-entrypoint.sh` compares a stamp in `PGDATA` against th
 
 It then writes the stamp and starts Postgres normally, so later starts skip the check. If any step fails, it logs a warning, starts Postgres anyway and retries on the next start. Set `PG_AUTO_UPGRADE=false` to turn it off.
 
-Rolling back to an older tag works, but the older image logs warnings, because the recorded collation and extension versions are now newer than the ones it ships.
+For volumes initialized with an older image, the automatic preload addition leaves the original configuration available for rollback. Extension upgrades are not reversed, and the older image may log warnings about newer extension or collation versions. Test rollback before relying on it.
+
+Volumes initialized with this release store `pg_hint_plan` in their preload list. Before using an older image that lacks the library, remove it from that persisted list. The same applies if you add it yourself with `ALTER SYSTEM`.
 
 ## GitHub Actions workflow
 
 The workflow in `.github/workflows/build-and-push.yml`:
 
 - Triggers on pushes/PRs touching Docker-related files, tests or workflows (including git tags), weekly on Monday, plus manual dispatch
-- Runs `tests/fresh.sh` (empty volumes under several `POSTGRES_USER`/`POSTGRES_DB` combinations) and `tests/upgrade.sh` (a `v1.0.2` volume swapped to the new image, restart, rollback); publishing only runs if both pass
+- Tests both `linux/amd64` and `linux/arm64` before publishing: fresh installations, upgrades from v1.1.0 and v1.0.2, restarts, rollback, actual comment hints and custom preload settings
 - Reads the Postgres major version from `ARG PG_MAJOR` in the `Dockerfile`
 - Builds multi-arch images (`linux/amd64`, `linux/arm64`) using Buildx + QEMU
 - Publishes tags to GitHub Container Registry (GHCR) with ref, PR, SHA, and Postgres version tags
@@ -98,14 +123,21 @@ Secrets required: none beyond the default `GITHUB_TOKEN` for pushing to GHCR.
 
 ### Releasing a new image
 
-1. Update the relevant build args in the `Dockerfile` (for example `PG_PARTMAN_VERSION=5.5.0`).
+1. Update the relevant build args in the `Dockerfile` (for example `PG_PARTMAN_VERSION=5.5.1`).
 2. Mirror the change in the `README.md` so the documented defaults stay in sync.
 3. Build and test the image locally:
 
 ```bash
-docker build -t postgres18-partman-cron:test .
+# Repeat for linux/amd64 and linux/arm64.
+export DOCKER_DEFAULT_PLATFORM=linux/arm64
+docker buildx build --platform "$DOCKER_DEFAULT_PLATFORM" --load -t postgres18-partman-cron:test .
+for script in docker-upgrade-entrypoint.sh docker-entrypoint-initdb.d/*.sh tests/*.sh; do
+  bash -n "$script" || exit
+done
 tests/fresh.sh postgres18-partman-cron:test
 tests/upgrade.sh postgres18-partman-cron:test
+tests/upgrade.sh postgres18-partman-cron:test ghcr.io/teams-work-ltd/postgres18-partman-cron:v1.0.2
+tests/preload.sh postgres18-partman-cron:test
 ```
 
 4. Commit and push the changes to `main` (or open a PR). The GitHub Actions workflow will build and push the GHCR tags automatically when the branch merges.

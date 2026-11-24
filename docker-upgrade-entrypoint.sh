@@ -97,22 +97,49 @@ auto_upgrade() {
 	[ -z "$failed" ] && echo "$stamp" > "$stamp_file"
 }
 
+# A command-line preload setting is an explicit replacement for the image default.
+has_preload_override() {
+	local arg setting previous=
+	for arg; do
+		setting=
+		case "$arg" in
+			-c?*) setting=${arg#-c} ;;
+			--*) setting=${arg#--} ;;
+			*) [ "$previous" != -c ] || setting=$arg ;;
+		esac
+		if [[ "$setting" =~ ^shared[-_]preload[-_]libraries([[:space:]]*=|$) ]]; then
+			return 0
+		fi
+		previous=$arg
+	done
+	return 1
+}
+
 if [ "${1:0:1}" = '-' ]; then
 	set -- postgres "$@"
 fi
 
-if [ "$1" = 'postgres' ] && ! _pg_want_help "$@" && [ "${PG_AUTO_UPGRADE:-true}" = 'true' ]; then
+if [ "$1" = 'postgres' ] && ! _pg_want_help "$@"; then
 	docker_setup_env
 	if [ "$(id -u)" = '0' ]; then
 		docker_create_db_directories
 		exec gosu postgres "$BASH_SOURCE" "$@"
 	fi
 
+	# Existing volumes skip init scripts. Add the library for this process only so
+	# an older image can still start with the original persisted configuration.
+	if [ -n "$DATABASE_ALREADY_EXISTS" ] && ! has_preload_override "$@"; then
+		preloads=$(postgres "${@:2}" -C shared_preload_libraries)
+		if ! [[ ",$preloads," =~ ,[[:space:]]*\"?pg_hint_plan\"?[[:space:]]*, ]]; then
+			set -- "$@" -c "shared_preload_libraries=${preloads:+$preloads,}pg_hint_plan"
+		fi
+	fi
+
 	# fingerprint of everything that can invalidate collations or extension versions: libc, server, extension control files
 	libc=$(grep -m1 -oE '/[^ ]*libc\.so\.6' /proc/$$/maps) || true
 	stamp="$(md5sum "$libc" | cut -c1-12) | $(postgres -V) | $(find /usr/share/postgresql* -path '*/extension/*.control' -exec cat {} + | md5sum | cut -c1-12)" || true
 	stamp_file="$PGDATA/.image-upgrade-stamp"
-	if [ -n "$DATABASE_ALREADY_EXISTS" ] && [ "$(cat "$stamp_file" 2>/dev/null)" != "$stamp" ]; then
+	if [ "${PG_AUTO_UPGRADE:-true}" = 'true' ] && [ -n "$DATABASE_ALREADY_EXISTS" ] && [ "$(cat "$stamp_file" 2>/dev/null)" != "$stamp" ]; then
 		echo "Image changed since this data directory was last upgraded; checking collations and extensions"
 		auto_upgrade "$@" || echo "WARNING: auto-upgrade did not complete, starting anyway; it will retry on next start" >&2
 	fi

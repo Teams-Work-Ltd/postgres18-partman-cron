@@ -24,20 +24,45 @@ permissions:
 
 jobs:
   test:
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [linux/amd64, linux/arm64]
     runs-on: blacksmith-4vcpu-ubuntu-2404
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Check shell syntax
+        run: |
+          for script in docker-upgrade-entrypoint.sh docker-entrypoint-initdb.d/*.sh tests/*.sh; do
+            bash -n "$script"
+          done
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build image
-        run: docker build -t postgres18-partman-cron:test .
+        run: docker buildx build --platform "${{ matrix.platform }}" --load -t postgres18-partman-cron:test .
+
+      - name: Select runtime platform
+        run: echo 'DOCKER_DEFAULT_PLATFORM=${{ matrix.platform }}' >> "$GITHUB_ENV"
 
       - name: Fresh install tests
         run: tests/fresh.sh postgres18-partman-cron:test
 
-      - name: Upgrade from previous release
+      - name: Upgrade from v1.1.0
         run: tests/upgrade.sh postgres18-partman-cron:test
+
+      - name: Upgrade from Debian v1.0.2
+        run: tests/upgrade.sh postgres18-partman-cron:test ghcr.io/teams-work-ltd/postgres18-partman-cron:v1.0.2
+
+      - name: Preload configuration tests
+        run: tests/preload.sh postgres18-partman-cron:test
 
   build-and-push:
     needs: test

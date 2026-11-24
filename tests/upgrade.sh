@@ -3,10 +3,11 @@
 # usage: tests/upgrade.sh <image> [previous image]
 set -uo pipefail
 IMG=$1
-OLD=${2:-ghcr.io/teams-work-ltd/postgres18-partman-cron:v1.0.2}
+OLD=${2:-ghcr.io/teams-work-ltd/postgres18-partman-cron:v1.1.0}
+TEST_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 C=pgpc-test-upgrade
 U=app_admin
-ARGS=(postgres -c shared_buffers=256MB -c max_connections=200 -c shared_preload_libraries=pg_cron,pg_stat_statements -c jit=off)
+ARGS=(postgres -c shared_buffers=256MB -c max_connections=200 -c jit=off)
 fail=0
 
 chk() { if eval "$2"; then echo "PASS $1"; else echo "FAIL $1"; fail=1; fi; }
@@ -35,7 +36,7 @@ docker rm -f $C >/dev/null 2>&1; docker volume rm $C >/dev/null 2>&1
 
 echo "### seed volume with $OLD"
 run "$OLD"
-q postgres <<'SQL'
+q postgres <<'SQL' || exit 1
 CREATE TABLE events (id bigint, created_at timestamptz NOT NULL, note text) PARTITION BY RANGE (created_at);
 SELECT partman.create_parent(p_parent_table := 'public.events', p_control := 'created_at', p_interval := '1 day') \g /dev/null
 INSERT INTO events SELECT g, now() - (g || ' hours')::interval, 'n' || g FROM generate_series(1, 48) g;
@@ -46,17 +47,24 @@ INSERT INTO corpus SELECT chr(i) FROM generate_series(1, 65535) i WHERE i NOT BE
 INSERT INTO corpus SELECT 'a' || chr(i) || 'b' FROM generate_series(32, 65535) i WHERE i NOT BETWEEN 55296 AND 57343;
 CREATE INDEX corpus_s ON corpus (s);
 CREATE DATABASE tenant_a;
+-- Keep an extra library in the persisted settings to check that startup preserves it.
+ALTER SYSTEM SET shared_preload_libraries = 'pg_cron', 'pg_stat_statements', 'auto_explain';
 SQL
-q tenant_a <<'SQL'
+q tenant_a <<'SQL' || exit 1
 CREATE TABLE docs (id int, title text, emb vector(3));
 INSERT INTO docs SELECT g, md5(g::text) || ' Title ' || chr(65 + g % 58), ARRAY[g, g + 1, g + 2]::vector FROM generate_series(1, 5000) g;
 CREATE INDEX docs_title ON docs (title);
--- built in C order then relabelled en_US.utf8, so it is misordered and the upgrade must reindex it
+-- Wolfi does not import named libc collations, so create one from the database locale.
+SELECT format('CREATE COLLATION test_libc (provider = libc, locale = %L)', datcollate)
+FROM pg_database WHERE datname = current_database() \gexec
+-- Build in C order, then relabel to the libc locale so the upgrade must reindex it.
 CREATE TABLE bad (s text);
 INSERT INTO bad SELECT x FROM unnest(ARRAY['a', 'B', 'c', 'D', 'e', 'F', 'g', 'H']) x;
 CREATE INDEX bad_s ON bad (s COLLATE "C");
-UPDATE pg_index SET indcollation = (SELECT oid FROM pg_collation WHERE collname = 'en_US.utf8')::text::oidvector
+UPDATE pg_index SET indcollation = 'test_libc'::regcollation::oid::text::oidvector
 WHERE indexrelid = 'bad_s'::regclass;
+-- Exercise the existing collation repair path even when old and new images use the same libc.
+UPDATE pg_collation SET collversion = 'test-old-version' WHERE oid = 'test_libc'::regcollation;
 SQL
 for db in postgres tenant_a template1; do echo "  $db: $(exts $db)"; done
 stop
@@ -65,10 +73,13 @@ echo "### swap to $IMG"
 run "$IMG"
 docker logs $C 2>&1 | grep -E "Image changed|upgrading database|updated extension|reindexing|auto-upgrade" | sort -u | sed 's/^/  /'
 chk "healthcheck" 'docker exec $C pg_isready -U $U -d postgres -q'
+chk "preload libraries preserved and pg_hint_plan added" '[ "$(q postgres -c "SHOW shared_preload_libraries")" = "pg_cron, pg_stat_statements, auto_explain,pg_hint_plan" ]'
+chk "preload change was not persisted" '! docker exec $C cat /var/lib/postgresql/18/docker/postgresql.auto.conf | grep pg_hint_plan'
 for db in postgres tenant_a template1; do
 	echo "  $db: $(exts $db)"
 	chk "$db: no warnings on connect" '[ -z "$(docker exec $C psql -U $U -d $db -Atc "SELECT 1" 2>&1 >/dev/null)" ]'
 	chk "$db: no outdated extensions" '[ "$(q $db -c "SELECT count(*) FROM pg_extension e JOIN pg_available_extensions a ON a.name = e.extname WHERE e.extversion <> a.default_version")" = 0 ]'
+	chk "$db: comment hints work" 'q $db < "$TEST_DIR/hints.sql" >/dev/null'
 done
 chk "temporary amcheck extension removed" '[ "$(q tenant_a -c "SELECT count(*) FROM pg_extension WHERE extname = '"'"'amcheck'"'"'")" = 0 ]'
 chk "misordered index was reindexed" 'docker logs $C 2>&1 | grep "index bad_s failed amcheck" >/dev/null'
@@ -84,17 +95,20 @@ stop
 echo "### restart"
 run "$IMG"
 chk "second start skips the upgrade" '! docker logs $C 2>&1 | grep "Image changed" >/dev/null'
+chk "hints work after restart" 'q tenant_a < "$TEST_DIR/hints.sql" >/dev/null'
 stop
 
 echo "### roll back to $OLD"
 run "$OLD"
 chk "previous release reads data" '[ "$(q postgres -c "SELECT count(*) FROM events" 2>/dev/null)" = 48 ]'
+chk "rollback uses original preload libraries" '[ "$(q postgres -c "SHOW shared_preload_libraries")" = "pg_cron, pg_stat_statements, auto_explain" ]'
 chk "previous release runs partman maintenance" 'q postgres -c "CALL partman.run_maintenance_proc()" >/dev/null 2>&1'
 stop
 
 echo "### forward again"
 run "$IMG"
 chk "no warnings on connect" '[ -z "$(docker exec $C psql -U $U -d postgres -Atc "SELECT 1" 2>&1 >/dev/null)" ]'
+chk "hints work after forward upgrade" 'q tenant_a < "$TEST_DIR/hints.sql" >/dev/null'
 stop
 docker volume rm $C >/dev/null
 
