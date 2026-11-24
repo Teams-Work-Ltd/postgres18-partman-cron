@@ -112,7 +112,7 @@ Volumes initialized with this release store `pg_hint_plan` in their preload list
 The workflow in `.github/workflows/build-and-push.yml`:
 
 - Triggers on pushes/PRs touching Docker-related files, tests or workflows (including git tags), weekly on Monday, plus manual dispatch
-- Tests both `linux/amd64` and `linux/arm64` before publishing: fresh installations, upgrades from v1.1.0 and v1.0.2, restarts, rollback, actual comment hints and custom preload settings
+- Tests `linux/amd64` and `linux/arm64` on matching native Blacksmith runners before publishing: fresh installations, upgrades from v1.1.0 and v1.0.2, restarts, rollback, actual comment hints and custom preload settings
 - Reads the Postgres major version from `ARG PG_MAJOR` in the `Dockerfile`
 - Builds multi-arch images (`linux/amd64`, `linux/arm64`) using Buildx + QEMU
 - Publishes tags to GitHub Container Registry (GHCR) with ref, PR, SHA, and Postgres version tags

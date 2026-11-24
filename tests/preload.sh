@@ -28,7 +28,8 @@ start() {
 		sleep 0.5
 	done
 	if [ "$ready" != true ]; then
-		docker logs "$C"
+		docker inspect -f 'status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{.State.Error}}' "$C"
+		docker logs --tail 100 "$C" 2>&1
 		return 1
 	fi
 }

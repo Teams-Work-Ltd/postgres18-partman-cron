@@ -9,11 +9,15 @@ fail=0
 
 chk() { if eval "$2"; then echo "PASS $1"; else echo "FAIL $1"; fail=1; fi; }
 q() { docker exec -i $C psql -U "$1" -d "$2" -v ON_ERROR_STOP=1 -Atq "${@:3}"; }
-cleanup() { docker rm -f $C >/dev/null 2>&1; docker volume rm $C >/dev/null 2>&1; }
+cleanup() {
+	docker rm -f $C >/dev/null 2>&1 || true
+	docker volume rm $C >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
 
 start() {
 	cleanup
-	docker run -d --name $C -v $C:/var/lib/postgresql -e POSTGRES_PASSWORD=test "$@" "$IMG" >/dev/null
+	docker run -d --name $C -v $C:/var/lib/postgresql -e POSTGRES_PASSWORD=test "$@" "$IMG" >/dev/null || return 1
 	for _ in $(seq 1 120); do
 		[ "$(docker inspect -f '{{.State.Running}}' $C)" = true ] || return 1
 		grep -q "init process complete" <<<"$(docker logs $C 2>&1)" \
@@ -37,7 +41,8 @@ for cfg in "${configs[@]}"; do
 	# shellcheck disable=SC2086
 	if ! start $args; then
 		echo "FAIL $name: container did not initialise"
-		docker logs $C 2>&1 | grep -E "ERROR|FATAL" | head -5
+		docker inspect -f 'status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{.State.Error}}' $C
+		docker logs --tail 100 $C 2>&1
 		fail=1
 		continue
 	fi

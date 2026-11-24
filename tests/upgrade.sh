@@ -27,7 +27,8 @@ run() {
 		sleep 0.5
 	done
 	echo "FAIL $1 did not start"
-	docker logs $C 2>&1 | tail -20
+	docker inspect -f 'status={{.State.Status}} exit={{.State.ExitCode}} oom={{.State.OOMKilled}} error={{.State.Error}}' $C
+	docker logs --tail 100 $C 2>&1
 	docker rm -f $C >/dev/null 2>&1; docker volume rm $C >/dev/null 2>&1
 	exit 1
 }
